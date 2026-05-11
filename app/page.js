@@ -3,7 +3,7 @@ import { useState, useRef, useEffect } from 'react';
 
 export default function AutomatorPage() {
   // Config default: Bing (20 tugas, delay 30s) | MSN (10 tugas, delay 35s)
-  const [config, setConfig] = useState({ msnCount: 10, msnDelay: 35, bingCount: 20, bingDelay: 30 });
+  const [config, setConfig] = useState({ msnCount: 10, msnDelay: 19, bingCount: 20, bingDelay: 12 });
   const [logs, setLogs] = useState([]);
   const [isRunning, setIsRunning] = useState(false);
   const [isWakeLocked, setIsWakeLocked] = useState(false);
