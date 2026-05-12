@@ -33,18 +33,47 @@ export default function AutomatorPage() {
     }
   };
 
-  // --- WAKE LOCK (Layar Tetap Nyala) ---
+
+    // --- PERBAIKAN WAKE LOCK ---
   const toggleWakeLock = async (on) => {
     if (on && 'wakeLock' in navigator) {
       try {
+        // Meminta izin kunci layar
         wakeLockRef.current = await navigator.wakeLock.request('screen');
+        
+        // Listener jika sistem tiba-tiba mematikan wake lock (misal: pindah app)
+        wakeLockRef.current.addEventListener('release', () => {
+          setIsWakeLocked(false);
+          addLog("⚠️ Wake Lock terlepas oleh sistem.");
+        });
+
         setIsWakeLocked(true);
-      } catch {}
-    } else if (wakeLockRef.current) {
-      wakeLockRef.current.release();
+        addLog("🟢 Layar akan tetap menyala.");
+      } catch (err) {
+        addLog("❌ Gagal mengaktifkan Wake Lock: " + err.message);
+      }
+    } else {
+      if (wakeLockRef.current) {
+        await wakeLockRef.current.release();
+        wakeLockRef.current = null;
+      }
       setIsWakeLocked(false);
     }
   };
+
+  // Otomatis minta ulang jika user kembali ke tab setelah pindah aplikasi
+  useEffect(() => {
+    const handleVisibilityChange = async () => {
+      if (wakeLockRef.current !== null && document.visibilityState === 'visible') {
+        wakeLockRef.current = await navigator.wakeLock.request('screen');
+        setIsWakeLocked(true);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, []);
+
+
 
   // Generator Parameter MSN agar terlihat natural
   const generateMsnParams = () => {
