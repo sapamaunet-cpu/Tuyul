@@ -2,16 +2,17 @@
 import { useState, useRef, useEffect } from 'react';
 
 export default function AutomatorPage() {
-  // Config default: Bing (20 tugas, delay 30s) | MSN (10 tugas, delay 35s)
-  const [config, setConfig] = useState({ msnCount: 10, msnDelay: 19, bingCount: 20, bingDelay: 12 });
+  const [config, setConfig] = useState({ msnCount: 10, msnDelay: 21, bingCount: 20, bingDelay: 13 });
   const [logs, setLogs] = useState([]);
   const [isRunning, setIsRunning] = useState(false);
   const [isWakeLocked, setIsWakeLocked] = useState(false);
+  const [captcha, setCaptcha] = useState({ a: 0, b: 0, result: '' });
+  const [showCaptcha, setShowCaptcha] = useState(false);
   const wakeLockRef = useRef(null);
 
   const addLog = (msg) => setLogs(p => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...p]);
 
-  // --- ANTI-DUPLIKASI HARIAN ---
+  // --- LOGIKA CACHE & RESET ---
   const checkAndResetDailyCache = () => {
     const today = new Date().toDateString();
     const lastResetDate = localStorage.getItem('last_reset_date');
@@ -19,12 +20,11 @@ export default function AutomatorPage() {
       localStorage.removeItem('used_keywords');
       localStorage.removeItem('used_links');
       localStorage.setItem('last_reset_date', today);
-      addLog("📅 Hari baru terdeteksi. Memori duplikasi direset!");
+      addLog("📅 Hari baru terdeteksi. Memory direset!");
     }
   };
 
   const getUsedData = (key) => JSON.parse(localStorage.getItem(key) || '[]');
-  
   const saveToCache = (key, item) => {
     const used = getUsedData(key);
     if (!used.includes(item)) {
@@ -33,63 +33,45 @@ export default function AutomatorPage() {
     }
   };
 
-
-    // --- PERBAIKAN WAKE LOCK ---
+  // --- WAKE LOCK (Layar On) ---
   const toggleWakeLock = async (on) => {
     if (on && 'wakeLock' in navigator) {
       try {
-        // Meminta izin kunci layar
         wakeLockRef.current = await navigator.wakeLock.request('screen');
-        
-        // Listener jika sistem tiba-tiba mematikan wake lock (misal: pindah app)
-        wakeLockRef.current.addEventListener('release', () => {
-          setIsWakeLocked(false);
-          addLog("⚠️ Wake Lock terlepas oleh sistem.");
-        });
-
         setIsWakeLocked(true);
-        addLog("🟢 Layar akan tetap menyala.");
-      } catch (err) {
-        addLog("❌ Gagal mengaktifkan Wake Lock: " + err.message);
-      }
-    } else {
-      if (wakeLockRef.current) {
-        await wakeLockRef.current.release();
-        wakeLockRef.current = null;
-      }
+      } catch (err) { console.log("WakeLock Error:", err); }
+    } else if (wakeLockRef.current) {
+      wakeLockRef.current.release();
+      wakeLockRef.current = null;
       setIsWakeLocked(false);
     }
   };
 
-  // Otomatis minta ulang jika user kembali ke tab setelah pindah aplikasi
-  useEffect(() => {
-    const handleVisibilityChange = async () => {
-      if (wakeLockRef.current !== null && document.visibilityState === 'visible') {
-        wakeLockRef.current = await navigator.wakeLock.request('screen');
-        setIsWakeLocked(true);
-      }
-    };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, []);
+  // --- CAPTCHA LOGIC ---
+  const prepareMisi = () => {
+    if (isRunning) return;
+    const n1 = Math.floor(Math.random() * 10) + 1;
+    const n2 = Math.floor(Math.random() * 10) + 1;
+    setCaptcha({ a: n1, b: n2, result: '' });
+    setShowCaptcha(true);
+  };
 
-
-
-  // Generator Parameter MSN agar terlihat natural
-  const generateMsnParams = () => {
-    const ocids = ['binghp', 'bingsapp', 'mqs', 'winp2oct'];
-    const cvid = [...Array(32)].map(() => Math.floor(Math.random() * 16).toString(16)).join('');
-    return `ocid=${ocids[Math.floor(Math.random() * ocids.length)]}&cvid=${cvid}&ei=${Math.floor(Math.random() * 99)}`;
+  const handleVerifyAndRun = () => {
+    if (parseInt(captcha.result) === (captcha.a + captcha.b)) {
+      setShowCaptcha(false);
+      startAutomation();
+    } else {
+      alert("Jawaban salah! Coba lagi.");
+      prepareMisi();
+    }
   };
 
   // --- FUNGSI UTAMA ---
   const startAutomation = async () => {
-    if (isRunning) return;
-    
     checkAndResetDailyCache();
     setIsRunning(true);
     await toggleWakeLock(true);
-    addLog("🚀 Memulai Misi (Bing & MSN)...");
+    addLog("🚀 Captcha Berhasil. Memulai misi...");
 
     try {
       const res = await fetch('/api/tasks');
@@ -98,7 +80,6 @@ export default function AutomatorPage() {
       const usedKeywords = getUsedData('used_keywords');
       const usedLinks = getUsedData('used_links');
 
-      // Filter yang belum pernah diklik hari ini
       const selectedKeywords = data.allKeywords
         .filter(k => !usedKeywords.includes(k))
         .sort(() => 0.5 - Math.random())
@@ -109,21 +90,15 @@ export default function AutomatorPage() {
         .sort(() => 0.5 - Math.random())
         .slice(0, Number(config.msnCount));
 
-      if (selectedKeywords.length === 0 && selectedLinks.length === 0) {
-        addLog("⚠️ Tidak ada tugas baru untuk hari ini.");
-        setIsRunning(false);
-        return;
-      }
-
-      // --- LOOP BING SEARCH (Optimasi Bing App) ---
+      // --- LOOP BING SEARCH ---
       if (selectedKeywords.length > 0) {
-        addLog(`🔍 Menjalankan ${selectedKeywords.length} Bing Search...`);
+        addLog(`🔍 Mencari ${selectedKeywords.length} kata kunci...`);
         for (let i = 0; i < selectedKeywords.length; i++) {
           const word = selectedKeywords[i];
           const actualDelay = (Number(config.bingDelay) + (Math.random() * 8)).toFixed(1);
           const cvid = [...Array(32)].map(() => Math.floor(Math.random() * 16).toString(16)).join('');
           
-          // Menggunakan PC=SANSAAND agar sinkron dengan Bing App Android
+          // Gunakan PC=SANSAAND agar poin masuk di Bing App
           const searchUrl = `https://www.bing.com/search?q=${encodeURIComponent(word)}&PC=SANSAAND&FORM=QSRE5&cvid=${cvid}`;
           
           addLog(`[Bing ${i+1}/${selectedKeywords.length}] ${word} (${actualDelay}s)`);
@@ -136,29 +111,28 @@ export default function AutomatorPage() {
         }
       }
 
-      // --- LOOP MSN READ (News) ---
+      // --- LOOP MSN READ ---
       if (selectedLinks.length > 0) {
-        addLog(`📰 Menjalankan ${selectedLinks.length} MSN News...`);
+        addLog(`📰 Membaca ${selectedLinks.length} berita MSN...`);
         for (let i = 0; i < selectedLinks.length; i++) {
           const link = selectedLinks[i];
           const actualMsnDelay = (Number(config.msnDelay) + (Math.random() * 10 - 5)).toFixed(1);
-          
-          // Tambahkan parameter unik MSN
-          const finalUrl = `${link}${link.includes('?') ? '&' : '?'}${generateMsnParams()}`;
-          
-          addLog(`[MSN ${i+1}/${selectedLinks.length}] Membaca Berita... (${actualMsnDelay}s)`);
+          const cvid = [...Array(32)].map(() => Math.floor(Math.random() * 16).toString(16)).join('');
+          const finalUrl = `${link}${link.includes('?') ? '&' : '?'}&cvid=${cvid}&ocid=binghp`;
+
+          addLog(`[MSN ${i+1}/${selectedLinks.length}] Reading... (${actualMsnDelay}s)`);
           const win = window.open(finalUrl, '_blank');
           saveToCache('used_links', link);
 
           await new Promise(r => setTimeout(r, actualMsnDelay * 1000));
           if (win) win.close();
-          await new Promise(r => setTimeout(r, 3500));
+          await new Promise(r => setTimeout(r, 3000));
         }
       }
 
-      addLog("✅ SEMUA MISI SELESAI UNTUK HARI INI!");
+      addLog("✅ SEMUA MISI SELESAI!");
     } catch (err) {
-      addLog("❌ Terjadi kesalahan: " + err.message);
+      addLog("❌ Error: " + err.message);
     } finally {
       setIsRunning(false);
       await toggleWakeLock(false);
@@ -166,46 +140,69 @@ export default function AutomatorPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-100 p-4 font-sans text-slate-800">
-      <div className="max-w-md mx-auto bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-200">
-        <div className="bg-gradient-to-r from-blue-600 to-indigo-700 p-6 text-white text-center">
-          <h1 className="text-2xl font-black italic tracking-tighter">BING & MSN BOT</h1>
-          <p className="text-[10px] font-bold uppercase tracking-widest opacity-80">
-            {isWakeLocked ? '🟢 Screen Always On' : '⚪ Screen Auto-Off'}
+    <div className="min-h-screen bg-slate-50 p-4 font-sans text-slate-900">
+      {/* Modal Captcha */}
+      {showCaptcha && (
+        <div className="fixed inset-0 bg-slate-900/95 flex items-center justify-center z-50 p-6">
+          <div className="bg-white rounded-3xl p-8 w-full max-w-xs text-center shadow-2xl">
+            <h2 className="text-sm font-black text-slate-400 uppercase mb-2">Verifikasi</h2>
+            <div className="text-4xl font-black text-indigo-600 mb-6 bg-slate-100 py-6 rounded-2xl">
+              {captcha.a} + {captcha.b}
+            </div>
+            <input 
+              type="number" 
+              value={captcha.result} 
+              onChange={(e) => setCaptcha({...captcha, result: e.target.value})}
+              className="w-full text-center text-2xl font-bold border-2 border-slate-200 rounded-xl p-3 mb-6 outline-none focus:border-indigo-500"
+              placeholder="?"
+              autoFocus
+            />
+            <div className="flex gap-2">
+              <button onClick={() => setShowCaptcha(false)} className="flex-1 py-3 text-slate-400 font-bold uppercase text-[10px]">Batal</button>
+              <button onClick={handleVerifyAndRun} className="flex-1 bg-indigo-600 py-3 rounded-xl text-white font-bold uppercase text-[10px]">Mulai</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="max-w-md mx-auto bg-white rounded-[2.5rem] shadow-2xl overflow-hidden border">
+        <div className="bg-indigo-600 p-8 text-white">
+          <h1 className="text-2xl font-black italic tracking-tighter">BING BOT PRO</h1>
+          <p className="text-[10px] font-bold uppercase tracking-[0.2em] opacity-70 mt-1">
+            {isWakeLocked ? '🟢 Screen Always On' : '⚪ Screen Standby'}
           </p>
         </div>
 
-        <div className="p-6">
+        <div className="p-8">
           <div className="grid grid-cols-2 gap-4 mb-6">
-            <div className="p-3 bg-blue-50 rounded-2xl border border-blue-100">
-              <span className="text-[10px] font-black text-blue-500 uppercase block mb-1">Bing Search</span>
-              <input type="number" value={config.bingCount} onChange={e => setConfig({...config, bingCount: e.target.value})} className="w-full text-sm font-bold bg-transparent outline-none border-b border-blue-200 focus:border-blue-500" />
-              <input type="number" value={config.bingDelay} onChange={e => setConfig({...config, bingDelay: e.target.value})} className="w-full text-[10px] mt-2 bg-transparent opacity-60 outline-none" placeholder="Delay (s)" title="Delay Search" />
+            <div className="bg-slate-50 p-4 rounded-2xl border">
+              <span className="text-[10px] font-black text-indigo-500 uppercase block mb-2">Bing Search</span>
+              <input type="number" value={config.bingCount} onChange={e => setConfig({...config, bingCount: e.target.value})} className="w-full bg-transparent font-bold border-b outline-none" />
+              <input type="number" value={config.bingDelay} onChange={e => setConfig({...config, bingDelay: e.target.value})} className="w-full bg-transparent text-[10px] mt-2 opacity-50 outline-none" />
             </div>
-            <div className="p-3 bg-emerald-50 rounded-2xl border border-emerald-100">
-              <span className="text-[10px] font-black text-emerald-600 uppercase block mb-1">MSN News</span>
-              <input type="number" value={config.msnCount} onChange={e => setConfig({...config, msnCount: e.target.value})} className="w-full text-sm font-bold bg-transparent outline-none border-b border-emerald-200 focus:border-emerald-500" />
-              <input type="number" value={config.msnDelay} onChange={e => setConfig({...config, msnDelay: e.target.value})} className="w-full text-[10px] mt-2 bg-transparent opacity-60 outline-none" placeholder="Delay (s)" title="Delay News" />
+            <div className="bg-slate-50 p-4 rounded-2xl border">
+              <span className="text-[10px] font-black text-emerald-500 uppercase block mb-2">MSN News</span>
+              <input type="number" value={config.msnCount} onChange={e => setConfig({...config, msnCount: e.target.value})} className="w-full bg-transparent font-bold border-b outline-none" />
+              <input type="number" value={config.msnDelay} onChange={e => setConfig({...config, msnDelay: e.target.value})} className="w-full bg-transparent text-[10px] mt-2 opacity-50 outline-none" />
             </div>
           </div>
 
-          <button onClick={startAutomation} disabled={isRunning} className={`w-full py-5 rounded-2xl font-black text-white shadow-lg transition-all active:scale-95 ${isRunning ? 'bg-slate-300' : 'bg-indigo-600 hover:bg-indigo-700'}`}>
-            {isRunning ? 'PROSES BERJALAN...' : 'GASKEUN SEKARANG'}
+          <button 
+            onClick={prepareMisi} 
+            disabled={isRunning} 
+            className={`w-full py-5 rounded-2xl font-black text-white shadow-xl transition-all active:scale-95 ${isRunning ? 'bg-slate-300' : 'bg-indigo-600'}`}
+          >
+            {isRunning ? 'SEDANG JALAN...' : 'GASKEUN SEKARANG'}
           </button>
 
-          <div className="mt-6">
-             <div className="flex justify-between items-center mb-2 px-1">
-                <span className="text-[10px] font-bold text-slate-400 uppercase">System Logs</span>
-                <button onClick={() => {localStorage.clear(); window.location.reload();}} className="text-[9px] font-bold text-red-400 hover:text-red-600 uppercase">Clear Memory</button>
-             </div>
-             <div className="bg-slate-900 rounded-2xl p-4 h-64 overflow-y-auto font-mono text-[10px] text-blue-300 shadow-inner border border-slate-800">
-                {logs.length === 0 && <div className="text-slate-700 italic text-center mt-20">Siap bertugas, Bos!</div>}
-                {logs.map((log, i) => <div key={i} className="mb-1 border-b border-slate-800/50 pb-1">{log}</div>)}
-             </div>
+          <div className="mt-8 bg-slate-900 rounded-2xl p-4 h-64 overflow-y-auto font-mono text-[10px] text-indigo-300 border shadow-inner">
+            {logs.length === 0 && <div className="text-slate-600 italic">Siap menjalankan misi harian...</div>}
+            {logs.map((log, i) => <div key={i} className="mb-1 border-b border-slate-800 pb-1">{log}</div>)}
           </div>
+          
+          <button onClick={() => {localStorage.clear(); window.location.reload();}} className="w-full mt-4 text-[9px] font-bold text-slate-300 uppercase tracking-widest">Clear All Data</button>
         </div>
       </div>
-      <p className="text-center mt-6 text-slate-400 text-[10px] font-bold uppercase tracking-widest">Optimized for Bing App Mobile</p>
     </div>
   );
 }
