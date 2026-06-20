@@ -2,7 +2,7 @@
 import { useState, useRef, useEffect } from 'react';
 
 export default function AutomatorPage() {
-  const [config, setConfig] = useState({ msnCount: 10, msnDelay: 21, bingCount: 20, bingDelay: 13 });
+  const [config, setConfig] = useState({ msnCount: 10, msnDelay: 16, bingCount: 18, bingDelay: 11 });
   const [logs, setLogs] = useState([]);
   const [isRunning, setIsRunning] = useState(false);
   const [isWakeLocked, setIsWakeLocked] = useState(false);
